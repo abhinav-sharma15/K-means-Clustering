@@ -1,0 +1,356 @@
+---
+title: "K-means"
+author: "Abhinav Sharma"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: cosmo
+    df_print: paged
+    self_contained: false
+    lib_dir: libs
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Calculating predictions with clustering in R
+
+For this project, I am a hypothetical data analyst for a large wholesale company that supplies various retailers with wine. My company is known for its high-quality wines. However, maintaining the high standard by only stocking wines that fulfil a certain quality standard can be a tedious and expensive process that requires the input of wine experts.
+To overcome this limitation, I plan to use a clustering model to group similar wines from previous years together, and then use these groups to categorise new wines based on physicochemical properties that are prominent in high-quality wines. Using these groups, I aim to determine whether a wine contains the physicochemical properties of a high-quality wine before stocking this wine.
+I also aim to build a clustering model that is able to identify types of wine, red or white, based on its physicochemical properties. 
+*Besides the hypothetical business problem, my aim is also to practically understand difference between k-means and hierarchical clustering and what situations favor each.*
+
+## Description of the data
+
+This data set contains a total of 4,898 white and 1,599 red Vinho Verde wine samples from the north of Portugal. The composition of the data set is therefore 75% white and 25% red wine samples. Each sample was tested by wine experts and scored between 0 and 10, with 0 representing a very bad wine and 10 representing an excellent wine. For privacy and logistical reasons, only physicochemical and sensory variables are available. No data regarding the grape types, wine brand, or price is available.
+
+
+## Load the relavant packages
+
+For data manipulation, I will use the tidyverse package. GGally, ggplot2, grid, and gridExtra are used for plotting and visualising the data. The cluster package is used to perform k-means and hierarchical clustering.
+
+
+```{r}
+# Hide warnings globally
+options(warn=-1) 
+
+# Load packages
+library(tidyverse)
+library(ggplot2)
+library(cluster)
+library(GGally) # Visualising the correlations
+library(grid) # Plotting the grid 
+library(gridExtra) # Plotting the grid
+
+# Set random seed
+set.seed(123)
+```
+
+## Loading the data set
+
+```{r}
+redWine <- read.csv("red_wine.csv", header = T,row.names = 1)
+whiteWine <- read.csv("white_wine.csv", header = T, row.names = 1)
+```
+
+### dim function
+
+```{r}
+# Red wines
+dim(redWine)
+```
+
+```{r}
+# White wines
+dim(whiteWine)
+```
+
+### Combining the data sets
+
+```{r}
+wine <- rbind(cbind(redWine,colour = "red"),
+              cbind(whiteWine,colour = "white"))
+wine
+```
+
+Note:
+
+* The first column is a random number to identify a wine, so it is a categorical variable.
+* Most of the variables are numerical and are on different scales.
+* The quality score is out of 10, which is an integer.
+* Colour is a categorical variable.
+
+## Exploratory Analysis
+
+Exploring density plots of the red and white groups for different variables
+Note: The density plot is a type of plot and is not related to the density variable in this data set.
+
+```{r}
+options(repr.plot.width=16, repr.plot.height=10)
+
+wine %>% 
+    gather(1:12, key = "variables", value = "result") %>%
+    ggplot(aes(result, fill = colour)) +
+    geom_density(alpha = 0.5)+
+    theme_classic()+
+    facet_wrap(.~variables, scale = "free")
+```
+
+**Observation: From the distributions we can see that chlorides and total.sulphar.dioxide are most different between red and white wine. There is also some difference in free.sulphar.dioxide and volatile.acidity**
+
+### Correlation between variables
+
+```{r}
+options(repr.plot.width=30, repr.plot.height=16)
+
+ggpairs(wine, 
+        mapping = ggplot2::aes(color = colour),
+        lower = list(continuous = wrap("points", alpha = 0.3), combo ='dot_no_facet'),
+        upper = list(combo = 'box_no_facet'))
+```
+
+**The strongest correlation we see is in between free and total suphar dioxide (sort of expected). Residual sugar and density also has strong correlation. quality seems to be correlated to volatile.acidity, density and alcohol.**
+
+### Exploring potential drivers of quality using scatterplots
+
+Given the insights from the data exploration, what questions can we ask? Can wines be segregated according to quality? What factors might drive the quality of red and white wines?
+
+To determine which variables affect the quality of wines, the variables are plotted in the steps that follow.
+
+```{r}
+options(repr.plot.width=20, repr.plot.height=16)
+
+p1 = wine  %>% 
+    ggplot(aes(x = quality, y = fixed.acidity))+
+    geom_jitter(aes(col=colour),size =3, alpha =0.5)
+
+p2 = wine  %>% 
+    ggplot(aes(x = quality, y = volatile.acidity))+
+    geom_jitter(aes(col=colour),size =3, alpha =0.5)
+
+p3 = wine  %>% 
+    ggplot(aes(x = quality, y = citric.acid))+
+    geom_jitter(aes(col=colour),size =3, alpha =0.5)
+
+p4 = wine  %>% 
+    ggplot(aes(x = quality, y = residual.sugar))+
+    geom_jitter(aes(col=colour),size =3, alpha =0.5)
+
+p5 = wine  %>% 
+    ggplot(aes(x = quality, y = chlorides))+
+    geom_jitter(aes(col=colour),size =3, alpha =0.5)
+
+p6 = wine  %>% 
+    ggplot(aes(x = quality, y = free.sulfur.dioxide))+
+    geom_jitter(aes(col=colour),size =3, alpha =0.5)
+
+p7 = wine  %>% 
+    ggplot(aes(x = quality, y = total.sulfur.dioxide))+
+    geom_jitter(aes(col=colour),size =3, alpha =0.5)
+
+p8 = wine  %>% 
+    ggplot(aes(x = quality, y = density))+
+    geom_jitter(aes(col=colour),size =3, alpha =0.5)
+
+p9 = wine  %>% 
+    ggplot(aes(x = quality, y = pH))+
+    geom_jitter(aes(col=colour),size =3, alpha =0.5)
+
+p10 = wine  %>% 
+    ggplot(aes(x = quality, y = sulphates))+
+    geom_jitter(aes(col=colour),size =3, alpha =0.5)
+
+p11 = wine  %>% 
+    ggplot(aes(x = quality, y = alcohol))+
+    geom_jitter(aes(col=colour),size =3, alpha =0.5)
+
+grid.arrange(p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,
+             nrow = 4,
+             ncol = 3)
+```
+
+**From the scatterplots, we can find some relationship between high alcohol content and better quality. Similarly, citric acid content could also determine better quality.**
+
+## Plot alcohol vs total.sulfur.dioxide
+
+These two variables are where clusters may be visually apparent in a two-dimensional plot since total.sulfur.dioxide had the largest separations between red and white for the distribution plots, and alcohol had the highest correlation with quality for red and white wines.
+
+
+```{r}
+wine  %>% 
+    ggplot(aes(x = total.sulfur.dioxide,
+               y = alcohol,
+               col = as.factor(quality),
+               shape = colour))+
+    geom_point(size = 4,alpha = 0.5)
+```
+
+Figure legend:
+
+The legend shows the wine types "red" and "white" as circles and triangles respectively. Quality scores from 3 to 9 are indicated by colours. Quality scores from 3 to 6 are indicated by red, yellow, green, and teal, whereas higher scores from 7 to 9 are indicated by blue, purple, and pink.
+
+It can be inferred to some extent that higher alcohol content is a indication to better quality. Red wine tends to have a low total.sulphar.dioxide value
+
+## Scale and centre the data
+
+```{r}
+wine_scaled  <- wine[,c(1:12)]  %>% 
+    scale(center = TRUE, scale = TRUE)  %>% 
+    as.data.frame()
+```
+
+## Silhouette scores
+
+```{r}
+silhouette_vec <- vector()
+k <- vector()
+distances <- dist(wine[,1:12])
+```
+
+Determine the silhouette score for 2 to 20 clusters.
+
+```{r}
+for(i in 2:20) {
+  
+  model <- kmeans(wine_scaled, i)
+  ss <- silhouette(model$cluster, distances)
+  silhouette_vec[i] <- mean(ss[,3])
+  k[i] <- i
+}
+```
+
+Create a data frame model_statistics with the variables silhouette_vec and k.
+
+```{r}
+model_statistics <- data.frame(
+  cluster_number = k[2:20],
+  silhouette_score = silhouette_vec[2:20]
+)
+```
+
+### Plot silhouette scores vs number of clusters
+
+```{r}
+ggplot(model_statistics, aes(x = cluster_number, y = silhouette_score)) +
+  geom_point() + geom_line()
+```
+
+## K-means clustering with two clusters
+
+```{r}
+kmeans_model_2 <- kmeans(wine_scaled, 2)
+```
+
+### Plot the two clusters
+
+Note: All the variables are used to find the clusters, but they are plotted in two dimensions. The variables alcohol and total.sulfur.dioxide are chosen since potential groups appeared to be separable in this plane in the plot generated above.
+
+```{r}
+wine  %>% 
+    mutate(cluster = as.factor(kmeans_model_2$cluster),
+           colour = wine$colour)  %>% 
+    ggplot(aes(x = total.sulfur.dioxide,
+               y = alcohol,
+               col = cluster,
+               shape = colour)) +
+    geom_point(size = 4,alpha = 0.5)
+```
+
+**For the plot for two clusters we can infer that two variables - alcohol and total suphar dioxide togather can be a good predictor of color of the wine.**
+
+## Using three clusters with k-means clustering
+
+```{r}
+kmeans_model_3 <- kmeans(wine_scaled, 3)
+wine  %>% 
+    mutate(cluster = as.factor(kmeans_model_3$cluster),
+           colour = wine$colour)  %>% 
+    ggplot(aes(x = total.sulfur.dioxide,
+               y = alcohol,
+               col = cluster,
+               shape = colour)) +
+    geom_point(size = 4,alpha = 0.5)
+```
+
+## Assigning cluster labels to varaible averages
+
+```{r}
+wine[,1:12]  %>% 
+    mutate(clusters = kmeans_model_3$cluster) %>% 
+    aggregate(by = list(.$clusters),
+             FUN = mean)
+```
+
+**Observation - Apart from total.sulphar.dioxide and alcohol, we see a considerable difference in values for residual.sugar and free.sulfur.dioxide**
+
+Up to this point, the different steps of executing k-means clustering were illustrated. In the steps that follow, hierarchical clustering is executed on the same data set to split the data into appropriate clusters.
+
+## Applying hierarchical clustering and plot a dendrogram
+
+```{r}
+# apply hierarchical clustering
+hc <- hclust(distances) 
+# plot the dendrogram
+plot(hc)
+```
+
+## Cutting the dendrogram to form two clusters and plot the clusters
+
+```{r}
+hcluster_2 <- cutree(hc, 2)
+# Plot the clusters
+wine  %>% 
+    mutate(cluster = as.factor(hcluster_2),
+           colour = wine$colour)  %>% 
+    ggplot(aes(x = total.sulfur.dioxide,
+               y = alcohol,
+               col = cluster,
+               shape = colour)) +
+    geom_point(size = 4,alpha = 0.5)
+```
+
+There is similarity to the output of k-means with k = 2. It appears to cluster the red and white wines.
+
+## Cutting the dendrogram to form three clusters and plot the clusters
+
+```{r}
+hcluster_3 <- cutree(hc, 3)
+# Plot the clusters
+wine  %>% 
+    mutate(cluster = as.factor(hcluster_3),
+           colour = wine$colour)  %>% 
+    ggplot(aes(x = total.sulfur.dioxide,
+               y = alcohol,
+               col = cluster,
+               shape = colour)) +
+    geom_point(size = 4,alpha = 0.5)
+```
+
+## Conclusion
+
+**What can we infer or predict from the analysis?**
+
+From the analysis that we did using scatterplot of quality against other variables, we observed that alcohol content has some correlation with quality. However, no variable showed deterministic influence on quality. What we essentially want here is more dots in the circled region indicating some relation between higher quality and alcohol content. We see this here in a limited but nondeterministic way. For other variables, there is no condensed pattern whatsoever in any region of the plot (linear upward or downward) and the quality is almost evenly spread across the middle axis. There is no bias noticed for a particular kind of wine as well (Red or white). 
+A distinct difference in measure is seen for total sulphur dioxide content for red vs white wine. From the plots it can be said that red wine has lower total.sulfur.dioxide content compared to white wine. We saw difference in chloride levels as well, however the range in this case is very small (two consecutive peaks of averages) hence not conclusive in determining difference between red and white wine.
+
+**How can a new wine with avaialble physicochemical properties be analyzed based on above model?**
+
+From the k-means clustering execution, we can infer that cluster 3 has best average quality at 6.14. This is followed by cluster 2 (5.58) and finally cluster 1 (5.54). Although the difference is not broad, but we can get some understanding of influential factors if we analyse traits of these 3 clusters. Some observations that can help us analyse a newly launched wine – 
+
+* Cluster 3 with highest average quality has the highest alcohol content as well. It is followed by cluster 2 and 1. This indicates positive correlation of alcohol content with quality. So one hypothesis we can carry forward is that more alcohol content is a indicator of better quality. Alcohol content is perhaps the only parameter that we can judge independent of wine colour.
+
+* Total sulphur dioxide is least for cluster 2 at 52.51 followed by cluster 3 (117.77) and then cluster 1 (168.17). although this is not in line with quality rankings but on observing the chart, we can infer that this parameter is a dependent of wine colour. Total sulphur dioxide will be more for white wine and less for red wines. Hence, while looking at our k-means clusters, this comparison is really between cluster 1 and 3 since both are dominated by white wine samples. From here we can deduce that lower content is generally an indicator of better quality. Therefore, Analysis of a new wine would depend on its wine colour.
+
+* Apart from the above two, we can also say that there is a negative correlation between wine quality and residual sugar content. Less sugar content is an indicator of a quality wine. 
+
+**How is hierarchical clustering different from k-means**
+
+Hierarchical clustering showed more refined separation from the point of view of parameter total.sulfur.dioxide. There are 3 almost distinct sections based on measure of this parameter with very little interference. Following differences were observed – 
+K means clustering was more spherical in nature with data points mixing to some extent. However, hierarchical clustering tended to slice the data points in to 3 regions based on total.sulfur.dioxide values. 
+The approach for hierarchical clustering makes it prone to outliers and noise. If there are outliers present, the concerned cluster could be smaller in size compared to others. We see that for cluster 3 in our hierarchical cluster.
+Moreover, hierarchical clustering does a better job of classifying red vs white wine based on sulphur dioxide content. Hence, based on the requirements, either k-means or hierarchical clustering could be a preferred mode of clustering here. 
+
+
